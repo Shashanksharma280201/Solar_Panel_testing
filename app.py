@@ -4,6 +4,7 @@ AI-Powered Electroluminescence Image Analysis System
 
 This is a self-contained deployable application that demonstrates
 solar panel defect detection using pre-computed YOLO inference results.
+Users can upload images and get matching results from the pre-computed dataset.
 """
 import os
 import time
@@ -11,9 +12,23 @@ import random
 import json
 from pathlib import Path
 from flask import Flask, render_template, request, jsonify, send_from_directory
+from werkzeug.utils import secure_filename
 
 # Initialize Flask app
 app = Flask(__name__)
+
+# Upload configuration
+UPLOAD_FOLDER = Path(__file__).parent / 'uploads'
+ALLOWED_EXTENSIONS = {'png', 'jpg', 'jpeg'}
+app.config['UPLOAD_FOLDER'] = UPLOAD_FOLDER
+app.config['MAX_CONTENT_LENGTH'] = 16 * 1024 * 1024  # 16MB max upload
+
+# Create uploads folder if it doesn't exist
+UPLOAD_FOLDER.mkdir(exist_ok=True)
+
+def allowed_file(filename):
+    """Check if file extension is allowed"""
+    return '.' in filename and filename.rsplit('.', 1)[1].lower() in ALLOWED_EXTENSIONS
 
 # Configuration - All paths relative to app directory
 BASE_DIR = Path(__file__).parent
@@ -185,6 +200,108 @@ def analyze():
             'coverage_percentage': 0,
             'total_defect_area': 0
         })
+
+
+@app.route('/api/upload', methods=['POST'])
+def upload_and_analyze():
+    """
+    API endpoint to upload an image and get matching results.
+    Matches uploaded image filename with pre-computed results.
+    """
+    if 'file' not in request.files:
+        return jsonify({'error': 'No file provided'}), 400
+
+    file = request.files['file']
+
+    if file.filename == '':
+        return jsonify({'error': 'No file selected'}), 400
+
+    if not allowed_file(file.filename):
+        return jsonify({'error': 'Invalid file type. Allowed: jpg, jpeg, png'}), 400
+
+    # Get the filename
+    filename = secure_filename(file.filename)
+
+    # Check if we have results for this image
+    available_images = get_available_images()
+
+    # Try to find a matching image in our dataset
+    matched_image = None
+
+    # Direct match
+    if filename in available_images:
+        matched_image = filename
+    else:
+        # Try matching without extension or with different case
+        filename_base = os.path.splitext(filename)[0].lower()
+        for img in available_images:
+            img_base = os.path.splitext(img)[0].lower()
+            if img_base == filename_base:
+                matched_image = img
+                break
+
+    if not matched_image:
+        return jsonify({
+            'error': f'No matching results found for "{filename}". This image is not in our dataset.',
+            'available_count': len(available_images),
+            'hint': 'Please upload one of the 100 pre-analyzed solar panel images.'
+        }), 404
+
+    # Save the uploaded file temporarily
+    upload_path = UPLOAD_FOLDER / filename
+    file.save(upload_path)
+
+    # Simulate AI processing time (3-5 seconds for upload flow)
+    delay = random.uniform(3, 5)
+    time.sleep(delay)
+
+    # Get detection info from pre-computed results
+    detection_info = get_image_detection_info(matched_image)
+
+    # Clean up uploaded file
+    if upload_path.exists():
+        upload_path.unlink()
+
+    if detection_info:
+        return jsonify({
+            'success': True,
+            'uploaded_filename': filename,
+            'matched_image': matched_image,
+            'result_url': f'/results/{matched_image}',
+            'original_url': f'/original/{matched_image}',
+            'uploaded_url': f'/original/{matched_image}',  # Use original as reference
+            'processing_time': round(delay, 2),
+            'has_defects': detection_info['detections_count'] > 0,
+            'defect_count': detection_info['detections_count'],
+            'confidence': round(detection_info['max_confidence'], 4),
+            'status': detection_info['damage_status'],
+            'coverage_percentage': round(detection_info['coverage_percentage'], 2),
+            'total_defect_area': round(detection_info['total_defect_area'], 2),
+            'image_dimensions': detection_info.get('image_dimensions', {}),
+            'detected_objects': detection_info['detected_objects'][:10]
+        })
+    else:
+        return jsonify({
+            'success': True,
+            'uploaded_filename': filename,
+            'matched_image': matched_image,
+            'result_url': f'/results/{matched_image}',
+            'original_url': f'/original/{matched_image}',
+            'uploaded_url': f'/original/{matched_image}',
+            'processing_time': round(delay, 2),
+            'has_defects': False,
+            'defect_count': 0,
+            'confidence': 0,
+            'status': 'GOOD CONDITION',
+            'coverage_percentage': 0,
+            'total_defect_area': 0
+        })
+
+
+@app.route('/uploads/<filename>')
+def serve_upload(filename):
+    """Serve uploaded images"""
+    return send_from_directory(UPLOAD_FOLDER, filename)
 
 
 @app.route('/results/<filename>')
