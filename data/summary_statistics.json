@@ -1,0 +1,14 @@
+{
+  "total_images": 100,
+  "images_with_detections": 100,
+  "images_without_detections": 0,
+  "total_detected_objects": 2165,
+  "average_objects_per_image": 21.65,
+  "detection_rate": 100.0,
+  "damage_categories": {
+    "good_condition": 6,
+    "needs_repair": 62,
+    "critical": 27,
+    "fully_damaged": 5
+  }
+}
